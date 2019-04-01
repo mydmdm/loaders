@@ -23,6 +23,10 @@ def timer(func):
     return wraper
 
 
+def pandas_find_rows(df: pd.DataFrame, colname: str, colval):
+    return df.loc [df[colname] == colval]
+
+
 def get_id_codebook(meta_pth: str, synset_pth: str, write_to: str=None):
     "return a dataframe that can be used to translate ILSVRC2012_ID to KERAS_ID"
     columns = ('WNID', 'KERAS_ID', 'ILSVRC2012_ID', 'words')
@@ -77,7 +81,7 @@ def image2ndarray(fpath: str):
     return img[:,:,::-1]
 
 
-class ILSVRC2012Gen(Sequence):
+class ILSVRC2012ValGen(Sequence):
     'Generates data for Keras'
     def __init__(
         self, 
@@ -92,22 +96,17 @@ class ILSVRC2012Gen(Sequence):
         # load JPEG filenames from folder
         self.list_IDs = [os.path.join(img_folder, x) for x in os.listdir(img_folder)]
         self.list_IDs.sort()
-        pat = re.compile('ILSVRC2012_\w+_(\d+).JPEG')
-        img_no = [int(pat.findall(f)[-1]) for f in self.list_IDs]
         # deal with index translating
         self.words_table, self.ilsvrc2keras = get_id_codebook(
             os.path.join(devkit_t12, 'data', 'meta.mat'),
             synset_words
             )
-        ground_truth_all_ilsvrcid = pd.read_csv(
+        self.ground_truth_table = pd.read_csv(
             os.path.join(devkit_t12, 'data', 'ILSVRC2012_validation_ground_truth.txt'), 
             header=None, names=['ILSVRC2012_ID']
-        )['ILSVRC2012_ID']
-        ground_truth_all_kerasid = [self.ilsvrc2keras[i] for i in ground_truth_all_ilsvrcid]
-
-        self.ground_truth = np.array([
-            ground_truth_all_kerasid[i-1] for i in img_no
-        ])
+        )
+        self.ground_truth_all_kerasid = [self.ilsvrc2keras[i] for i in self.ground_truth_table['ILSVRC2012_ID']]
+        # deal with generator parameters
         self.batch_size = batch_size
         self.shuffle, self.indexes = shuffle, None
         self.on_epoch_end()
@@ -120,8 +119,8 @@ class ILSVRC2012Gen(Sequence):
         'Generate one batch of data'
         # Generate indexes of the batch
         indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
-        X = np.vstack([image2ndarray(self.list_IDs[i]) for i in indexes])
-        y = np.array([self.ground_truth[i] for i in indexes])
+        X = np.array([image2ndarray(self.list_IDs[i]) for i in indexes])
+        y = np.array([self.ground_truth_all_kerasid[i] for i in indexes])
         return X, y
 
     def on_epoch_end(self):
@@ -131,6 +130,6 @@ class ILSVRC2012Gen(Sequence):
             np.random.shuffle(self.indexes)
 
     def get_img_words(self, keras_id: int):
-        df = self.words_table
-        row = df.loc[df['KERAS_ID'] == keras_id][0]
-        return row['words']
+        rows = pandas_find_rows(self.words_table, 'KERAS_ID', keras_id)
+        assert len(rows) == 1, rows
+        return rows['words'][0]
